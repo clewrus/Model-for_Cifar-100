@@ -5,110 +5,13 @@ import numpy as np
 
 from argparse import ArgumentParser
 from tensorflow import keras
-from tensorflow.keras import regularizers
-from tensorflow.python.ops.gen_math_ops import ceil, floor
+from tensorflow.python.ops.gen_math_ops import ceil
 
+from model_cifar10 import model_cifar10
+from model_cifar100 import model_cifar100, load_backbone_from_cifar10_model
 
-def normalized_resnet_block( x, filters ):
-    for i in range(3):
-        y = keras.layers.BatchNormalization()(x)
-
-        y = keras.layers.Conv2D(
-            filters,
-            (3, 3),
-            activation='relu',
-            padding='same'
-        )(y)
-
-        y = keras.layers.Dropout(0.000)(y)
-
-        y = keras.layers.Conv2D(
-            filters,
-            (3, 3),
-            activation='relu',
-            padding='same'
-        )(y)
-
-        x = keras.layers.BatchNormalization()(x + y)
-    
-    return x
-
-def model( num_classes, input_shape, batch_size=None, augmentation=False ):
-    def model_input():
-        if batch_size:
-            return keras.Input(shape=input_shape, batch_size=batch_size)
-        else:
-            return keras.Input(shape=input_shape)
-
-    def augment_image(y):
-        #y = tf.keras.layers.experimental.preprocessing.RandomContrast((0.8, 1.2))(y)
-        # y = tf.keras.layers.experimental.preprocessing.RandomFlip()(y)
-        
-        #y = tf.keras.layers.experimental.preprocessing.RandomRotation(0.2)(y)
-        #y = tf.keras.layers.experimental.preprocessing.RandomTranslation(0.2, 0.2)(y)
-        # y = tf.keras.layers.experimental.preprocessing.RandomContrast((0.7, 1.3))(y)
-        # y = tf.keras.layers.experimental.preprocessing.RandomZoom(0.3)(y)
-        return y
-
-    def convolutional_backbone( y ):
-
-        y = keras.layers.Conv2D(16, (3, 3), activation='relu', padding='same')(y)
-        y = normalized_resnet_block(y, 16)      
-        y = keras.layers.MaxPool2D()(y)
-
-        y = keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same')(y)
-        y = normalized_resnet_block(y, 32)   
-        y = keras.layers.MaxPool2D()(y)
-
-        y = keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same')(y)
-        y = normalized_resnet_block(y, 64)      
-        y = keras.layers.AveragePooling2D((8, 8))(y)
-
-        return y
-
-    def dense_head(y):
-        y = keras.layers.Dense(
-            units=20,
-            activation='tanh',
-            kernel_regularizer=tf.keras.regularizers.l2(0.0002),
-            bias_regularizer=tf.keras.regularizers.l2(0.0002),
-            activity_regularizer=tf.keras.regularizers.l2(0.0002),
-        )(y)
-
-        #y = keras.layers.Dropout(0.1)(y)
-
-        return y
-
-    def classifier(y):
-        y = keras.layers.Dense(
-            units=num_classes,
-            activation='softmax'
-        )(y)
-
-        return y
-
-    x = model_input()
-
-    with tf.name_scope("augmentation"):
-        y = augment_image(x) if augmentation else x
-    
-    with tf.name_scope("convolutional_backbone"):
-        y = convolutional_backbone(y)
-    
-    with tf.name_scope("dense_head"):
-        y = keras.layers.Flatten()(y)
-        y = dense_head(y)
-    
-    with tf.name_scope("classifier"):
-        y = classifier(y) 
-    
-    m = keras.Model(inputs=x, outputs=y)
-    optimizer = tf.optimizers.Adam(learning_rate=0.0001)
-    m.compile(optimizer=optimizer, loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-    return m
-
-def load_train_validation_test(val_split=0.1, batch_size=1):
-    (train_x, train_y), (test_x, test_y) = keras.datasets.cifar10.load_data()
+def load_train_validation_test(dataset, val_split=0.1, batch_size=1):
+    (train_x, train_y), (test_x, test_y) = dataset.load_data()
     train_x, test_x = train_x / 255, test_x / 255
 
     train_size = train_x.shape[0]
@@ -141,13 +44,18 @@ if __name__ == '__main__':
     parser.add_argument( '--metrics_only', action='store_true')
     args = parser.parse_args()
 
-    train, validation, test = load_train_validation_test(val_split=0.1, batch_size=args.batches)
+    dataset = keras.datasets.cifar100
+    train, validation, test = load_train_validation_test(dataset, val_split=0.0, batch_size=args.batches)
+    validation = test
 
-    net = model(10, input_shape=(32, 32, 3), augmentation=True)
+    net_100 = model_cifar100(input_shape=(32, 32, 3), augmentation=True)
 
     if args.restore_from:
         ckpt_path = "checkpoints/{}".format( args.restore_from )
-        net.load_weights( ckpt_path, )
+        net_100.load_weights( ckpt_path )
+
+    print("validation", net_100.evaluate(validation) )
+    #net_100 = load_backbone_from_cifar10_model( net_10, trainable=False, input_shape=(32, 32, 3), augmentation=True)
 
     if not args.metrics_only:
         log_dir = 'logs/fit/{}'.format( args.experiment_name )
@@ -157,11 +65,11 @@ if __name__ == '__main__':
         cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path, verbose=1, save_weights_only=True)    
 
         
-        net.fit(train, validation_data=validation, epochs=args.epochs, callbacks=[log_callback, cp_callback])
+        net_100.fit(train, validation_data=validation, epochs=args.epochs, callbacks=[log_callback, cp_callback])
 
-    print("train", net.evaluate(train) )
-    print("validation", net.evaluate(validation) )
-    print("test", net.evaluate(test) )
+    print("train", net_100.evaluate(train) )
+    print("validation", net_100.evaluate(validation) )
+    print("test", net_100.evaluate(test) )
     
     
 
